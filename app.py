@@ -1465,12 +1465,13 @@ def logout():
 # INICIAR PROGRAMA
 # ==========================================
 
+crear_base_datos()
+
+
 if __name__ == "__main__":
 
-    crear_base_datos()
-
     app.run(
-        host="0.0.0.0",
-        port=int(__import__("os").environ.get("PORT", 5000)),
-        debug=False
+        host="127.0.0.1",
+        port=5000,
+        debug=True
     )
