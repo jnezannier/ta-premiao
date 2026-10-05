@@ -3,6 +3,8 @@ import os
 import psycopg
 from psycopg.rows import dict_row
 import random
+import secrets
+import string
 import base64
 import mimetypes
 from functools import wraps
@@ -18,7 +20,25 @@ def conectar():
         raise RuntimeError("Falta la variable de entorno DATABASE_URL.")
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
+def generar_codigo():
+    caracteres = string.ascii_uppercase + string.digits
 
+    while True:
+        codigo = "TP-" + "".join(
+            secrets.choice(caracteres) for _ in range(8)
+        )
+
+        conexion = conectar()
+
+        existente = conexion.execute(
+            "SELECT id FROM participantes WHERE codigo = %s",
+            (codigo,)
+        ).fetchone()
+
+        conexion.close()
+
+        if not existente:
+            return codigo
 def archivo_a_data_url(archivo, max_mb=5):
     if not archivo or not archivo.filename:
         return None
@@ -52,6 +72,10 @@ def crear_base_datos():
             telefono TEXT NOT NULL,
             sorteo_id BIGINT REFERENCES sorteos(id)
         )
+    """)    
+    cur.execute("""
+        ALTER TABLE participantes
+        ADD COLUMN IF NOT EXISTS codigo TEXT UNIQUE
     """)
     cur.execute("ALTER TABLE sorteos ADD COLUMN IF NOT EXISTS imagen_premio TEXT")
     cur.execute("ALTER TABLE sorteos ADD COLUMN IF NOT EXISTS ganador_id BIGINT")
@@ -102,7 +126,7 @@ def inicio():
     logo = config["logo_data"] if config and config["logo_data"] else url_for("static", filename="logo.png")
     return render_template_string("""
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TA PREMIA'O</title><style>{{style}}</style></head><body>
-<header class="top"><div class="topin"><div class="brand"><img src="{{logo}}"><div>TA <span>PREMIA'O</span></div></div><a class="btn gold" href="#sorteos">Participar</a></div></header>
+<header class="top"><div class="topin"><div class="brand"><img src="{{logo}}"><div>TA <span>PREMIA'O</span></div></div><a class="btn gold" href="#sorteos">Participar</a><a class="btn gold" href="/consultar">Consultar participación</a>
 <section class="hero"><div class="wrap"><div class="grid two" style="align-items:center"><div><div class="pill" style="background:#2a2a2a;color:#d5a64b">{{config['badge']}}</div><h1>{{config['titulo']}}</h1><p>{{config['subtitulo']}}</p></div><div style="text-align:center"><img class="logohero" src="{{logo}}"></div></div></div></section>
 <main class="wrap" id="sorteos"><div class="grid" style="margin-top:28px">{% for s in sorteos %}<article class="card publiccard"><div class="actions" style="justify-content:space-between"><span class="pill on">● SORTEO ACTIVO</span><span class="pill" style="background:#f4ead3;color:#765400">📅 {{s['fecha']}}</span></div><h2 style="font-size:30px;margin:14px 0 6px">{{s['nombre']}}</h2><div style="font-size:22px;font-weight:900;color:#9a6d18;margin-bottom:15px">🎁 {{s['premio']}}</div>{% if s['imagen_premio'] %}<img class="prizeimg" src="{{s['imagen_premio']}}" alt="Imagen del premio">{% endif %}<p class="muted" style="line-height:1.6">{{s['descripcion']}}</p><a class="btn dark" style="margin-top:10px" href="{{url_for('participar',sorteo_id=s['id'])}}">Participar</a></article>{% else %}<div class="card"><h2>No hay sorteos activos</h2><p class="muted">Vuelve pronto.</p></div>{% endfor %}</div>
 <section><h2 style="font-size:30px;margin-top:42px">¿Cómo participar?</h2><div class="steps"><div class="step"><b>1. Elige el sorteo</b><p class="muted">Selecciona el sorteo activo que quieras.</p></div><div class="step"><b>2. Completa tus datos</b><p class="muted">Registra tus datos en el formulario.</p></div><div class="step"><b>3. Recibe tu número</b><p class="muted">Obtendrás automáticamente tu número de participación.</p></div></div></section>
@@ -125,8 +149,16 @@ def participar(sorteo_id):
         nombre=request.form.get("nombre","").strip(); correo=request.form.get("correo","").strip(); telefono=request.form.get("telefono","").strip()
         if not nombre or not correo or not telefono:c.close(); return "Completa todos los campos.",400
         if c.execute("SELECT id FROM participantes WHERE correo=%s AND sorteo_id=%s",(correo,sorteo_id)).fetchone():c.close(); return "Este correo ya está registrado en este sorteo.",409
-        cur=c.cursor(); cur.execute("INSERT INTO participantes(nombre,correo,telefono,sorteo_id) VALUES(%s,%s,%s,%s) RETURNING id",(nombre,correo,telefono,sorteo_id)); numero=cur.fetchone()["id"]; c.commit(); c.close()
-        return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Registro</title><style>{{style}}</style></head><body><div class=wrap style='padding-top:50px'><div class=card style='max-width:520px;margin:auto;text-align:center'><h1>✅ Registro exitoso</h1><p>Tu número de participación es</p><div style='font-size:60px;font-weight:900;color:#b8872d'>#{{numero}}</div><a class='btn dark' href='/'>Volver al inicio</a></div></div></body></html>""",style=BASE_STYLE,numero=numero)
+codigo = generar_codigo()
+cur = c.cursor()
+cur.execute(
+    "INSERT INTO participantes(nombre,correo,telefono,sorteo_id,codigo) VALUES(%s,%s,%s,%s,%s) RETURNING id",
+    (nombre,correo,telefono,sorteo_id,codigo)
+)
+numero = cur.fetchone()["id"]
+c.commit()
+c.close()
+ return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Registro</title><style>{{style}}</style></head><body><div class=wrap style='padding-top:50px'><div class=card style='max-width:520px;margin:auto;text-align:center'><h1>✅ Registro exitoso</h1><p>Tu número de participación es</p><div style='font-size:60px;font-weight:900;color:#b8872d'>#{{numero}}</div><p style='margin-top:25px'>Tu código de participación es:</p><div style='font-size:30px;font-weight:900;color:#111;letter-spacing:2px'>{{codigo}}</div><p style='color:#666'>Guarda este código para consultar tu participación.</p><a class='btn dark' href='/'>Volver al inicio</a></div></div></body></html>""",style=BASE_STYLE,numero=numero,codigo=codigo)
     c.close()
     return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Participar</title><style>{{style}}</style></head><body><div class=wrap style='padding:40px 15px'><div class=card style='max-width:560px;margin:auto'><h1>{{s['nombre']}}</h1><h2>{{s['premio']}}</h2>{% if s['imagen_premio'] %}<img class=prizeimg src='{{s['imagen_premio']}}'>{% endif %}<p class=muted>{{s['descripcion']}}</p><form method=post><label>Nombre completo</label><input name=nombre required><label>Correo electrónico</label><input type=email name=correo required><label>Teléfono</label><input name=telefono required><button class='btn dark' style='width:100%'>Participar</button></form></div></div></body></html>""",style=BASE_STYLE,s=s)
 
@@ -139,12 +171,141 @@ def login():
     return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin</title><style>{{style}}</style></head><body><div class=wrap style='padding-top:70px'><div class=card style='max-width:420px;margin:auto'><h1>🔐 Administrador</h1><form method=post><label>Contraseña</label><input type=password name=contrasena required><button class='btn dark' style='width:100%'>Entrar</button></form></div></div></body></html>""",style=BASE_STYLE)
 
 
+@app.route("/consultar", methods=["GET", "POST"])
+def consultar():
+    resultado = None
+
+    if request.method == "POST":
+        codigo = request.form.get("codigo", "").strip().upper()
+
+        c = conectar()
+
+        resultado = c.execute("""
+            SELECT participantes.nombre,
+                   participantes.codigo,
+                   sorteos.nombre AS sorteo_nombre,
+                   sorteos.premio,
+                   sorteos.fecha
+            FROM participantes
+            LEFT JOIN sorteos
+            ON participantes.sorteo_id = sorteos.id
+            WHERE participantes.codigo = %s
+        """, (codigo,)).fetchone()
+
+        c.close()
+
+    return render_template_string("""
+    <!doctype html>
+    <html lang="es">
+    <head>
+        <meta name="viewport"
+              content="width=device-width,initial-scale=1">
+        <title>Consultar participación</title>
+        <style>{{style}}</style>
+    </head>
+
+    <body>
+
+        <div class="wrap" style="padding-top:50px">
+
+            <div class="card"
+                 style="max-width:560px;margin:auto">
+
+                <h1>🔎 Consultar participación</h1>
+
+                <p>
+                    Escribe tu código de participación
+                    para consultar tus datos.
+                </p>
+
+                <form method="POST">
+
+                    <input
+                        type="text"
+                        name="codigo"
+                        placeholder="TP-XXXXXXXX"
+                        required
+                        style="width:100%;
+                               box-sizing:border-box;
+                               padding:14px;
+                               margin:15px 0;
+                               border-radius:10px;
+                               border:1px solid #ccc;
+                               font-size:17px;
+                               text-transform:uppercase"
+                    >
+
+                    <button
+                        class="btn dark"
+                        type="submit">
+                        Consultar
+                    </button>
+
+                </form>
+
+                {% if resultado %}
+
+                    <hr style="margin:25px 0">
+
+                    <h2>✅ Participación encontrada</h2>
+
+                    <p>
+                        <strong>Nombre:</strong>
+                        {{ resultado["nombre"] }}
+                    </p>
+
+                    <p>
+                        <strong>Código:</strong>
+                        {{ resultado["codigo"] }}
+                    </p>
+
+                    <p>
+                        <strong>Sorteo:</strong>
+                        {{ resultado["sorteo_nombre"] }}
+                    </p>
+
+                    <p>
+                        <strong>Premio:</strong>
+                        {{ resultado["premio"] }}
+                    </p>
+
+                    <p>
+                        <strong>Fecha:</strong>
+                        {{ resultado["fecha"] }}
+                    </p>
+
+                {% elif request.method == "POST" %}
+
+                    <hr style="margin:25px 0">
+
+                    <h2>❌ Código no encontrado</h2>
+
+                    <p>
+                        Verifica que hayas escrito correctamente
+                        tu código de participación.
+                    </p>
+
+                {% endif %}
+
+                <a
+                    class="btn dark"
+                    href="/">
+                    Volver al inicio
+                </a>
+
+            </div>
+
+        </div>
+
+    </body>
+    </html>
+    """, style=BASE_STYLE, resultado=resultado)
 @app.route("/admin")
 @requiere_admin
 def admin():
     c=conectar(); sorteos=c.execute("SELECT * FROM sorteos ORDER BY id DESC").fetchall(); participantes=c.execute("SELECT participantes.*,sorteos.nombre AS sorteo_nombre FROM participantes LEFT JOIN sorteos ON participantes.sorteo_id=sorteos.id ORDER BY participantes.id DESC").fetchall(); config=c.execute("SELECT * FROM configuracion WHERE id=1").fetchone(); c.close()
     logo=config["logo_data"] if config and config["logo_data"] else url_for("static",filename="logo.png")
-    return render_template_string("""<!doctype html><html lang=es><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin TA PREMIA'O</title><style>{{style}}</style></head><body><header class=top><div class=topin><div class=brand><img src='{{logo}}'><div>TA <span>PREMIA'O</span></div></div><a class='btn white' href='/logout'>Cerrar sesión</a></div></header><main class=wrap><div class=adminnav><a class='btn gold' href='#config'>⚙️ Página</a><a class='btn dark' href='#sorteos'>🎯 Sorteos</a><a class='btn white' href='#participantes'>👥 Participantes</a></div><div class=card id=config><h2>🎨 Editar página</h2><p class=muted>Todo lo que cambies aquí se guarda en Supabase. No necesitas comandos.</p><form method=post action='/admin/configuracion' enctype='multipart/form-data'><div class=grid two><div><label>Logo</label><input type=file name=logo accept='image/*'><small class=muted>Si no eliges uno, se mantiene el actual.</small></div><div><label>Instagram</label><input name=instagram value='{{config["instagram"]}}' placeholder='@ta_premia_o'></div></div><label>Título principal</label><input name=titulo value='{{config["titulo"]}}'><label>Subtítulo</label><textarea name=subtitulo>{{config["subtitulo"]}}</textarea><label>Texto de la insignia</label><input name=badge value='{{config["badge"]}}'><button class='btn gold'>💾 Guardar cambios de página</button></form></div><div id=sorteos style='margin-top:22px' class=card><div class=actions style='justify-content:space-between'><h2>🎯 Sorteos</h2><a class='btn gold' href='/crear-sorteo'>➕ Crear sorteo</a></div>{% for s in sorteos %}<div style='border-top:1px solid #eee;padding:18px 0'><div class=actions style='justify-content:space-between'><div><h3 style='margin:0'>{{s['nombre']}}</h3><p class=muted>🎁 {{s['premio']}} · 📅 {{s['fecha']}}</p></div><span class='pill {{"on" if s["activo"] else "off"}}'>{{"Activo" if s["activo"] else "Inactivo"}}</span></div><div class=actions style='margin-top:10px'><a class='btn dark' href='/admin/editar-sorteo/{{s["id"]}}'>✏️ Editar</a><a class='btn white' href='/ganador/{{s["id"]}}'>🏆 {{"Ver ganador" if s['ganador_id'] else "Elegir ganador"}}</a></div></div>{% endfor %}</div><div id=participantes style='margin:22px 0' class=card><h2>👥 Participantes</h2><div class=tablewrap><table><tr><th>#</th><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Sorteo</th></tr>{% for p in participantes %}<tr><td>{{p['id']}}</td><td>{{p['nombre']}}</td><td>{{p['correo']}}</td><td>{{p['telefono']}}</td><td>{{p['sorteo_nombre'] or '—'}}</td></tr>{% endfor %}</table></div></div></main></body></html>""",style=BASE_STYLE,sorteos=sorteos,participantes=participantes,config=config,logo=logo)
+    return render_template_string("""<!doctype html><html lang=es><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Admin TA PREMIA'O</title><style>{{style}}</style></head><body><header class=top><div class=topin><div class=brand><img src='{{logo}}'><div>TA <span>PREMIA'O</span></div></div><a class='btn white' href='/logout'>Cerrar sesión</a></div></header><main class=wrap><div class=adminnav><a class='btn gold' href='#config'>⚙️ Página</a><a class='btn dark' href='#sorteos'>🎯 Sorteos</a><a class='btn white' href='#participantes'>👥 Participantes</a></div><div class=card id=config><h2>🎨 Editar página</h2><p class=muted>Todo lo que cambies aquí se guarda en Supabase. No necesitas comandos.</p><form method=post action='/admin/configuracion' enctype='multipart/form-data'><div class=grid two><div><label>Logo</label><input type=file name=logo accept='image/*'><small class=muted>Si no eliges uno, se mantiene el actual.</small></div><div><label>Instagram</label><input name=instagram value='{{config["instagram"]}}' placeholder='@ta_premia_o'></div></div><label>Título principal</label><input name=titulo value='{{config["titulo"]}}'><label>Subtítulo</label><textarea name=subtitulo>{{config["subtitulo"]}}</textarea><label>Texto de la insignia</label><input name=badge value='{{config["badge"]}}'><button class='btn gold'>💾 Guardar cambios de página</button></form></div><div id=sorteos style='margin-top:22px' class=card><div class=actions style='justify-content:space-between'><h2>🎯 Sorteos</h2><a class='btn gold' href='/crear-sorteo'>➕ Crear sorteo</a></div>{% for s in sorteos %}<div style='border-top:1px solid #eee;padding:18px 0'><div class=actions style='justify-content:space-between'><div><h3 style='margin:0'>{{s['nombre']}}</h3><p class=muted>🎁 {{s['premio']}} · 📅 {{s['fecha']}}</p></div><span class='pill {{"on" if s["activo"] else "off"}}'>{{"Activo" if s["activo"] else "Inactivo"}}</span></div><div class=actions style='margin-top:10px'><a class='btn dark' href='/admin/editar-sorteo/{{s["id"]}}'>✏️ Editar</a><a class='btn white' href='/ganador/{{s["id"]}}'>🏆 {{"Ver ganador" if s['ganador_id'] else "Elegir ganador"}}</a></div></div>{% endfor %}</div><div id=participantes style='margin:22px 0' class=card><h2>👥 Participantes</h2><div class=tablewrap><table><tr><th>#</th><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Código</th><th>Sorteo</th></tr>{% for p in participantes %}<tr><td>{{p['id']}}</td><td>{{p['nombre']}}</td><td>{{p['correo']}}</td><td>{{p['telefono']}}</td><td>{{p['codigo']}}</td><td>{{p['sorteo_nombre'] or '—'}}</td></tr>{% endfor %}</table></div></div></main></body></html>""",style=BASE_STYLE,sorteos=sorteos,participantes=participantes,config=config,logo=logo)
 
 
 @app.route("/admin/configuracion",methods=["POST"])
