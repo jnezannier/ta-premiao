@@ -145,20 +145,17 @@ def _ganadores_para(sorteos):
 def participar(sorteo_id):
     c=conectar(); s=c.execute("SELECT * FROM sorteos WHERE id=%s AND activo=1",(sorteo_id,)).fetchone()
     if not s:c.close(); return "Sorteo no encontrado.",404
-    if request.method=="POST":
+        if request.method=="POST":
         nombre=request.form.get("nombre","").strip(); correo=request.form.get("correo","").strip(); telefono=request.form.get("telefono","").strip()
         if not nombre or not correo or not telefono:c.close(); return "Completa todos los campos.",400
         if c.execute("SELECT id FROM participantes WHERE correo=%s AND sorteo_id=%s",(correo,sorteo_id)).fetchone():c.close(); return "Este correo ya está registrado en este sorteo.",409
-codigo = generar_codigo()
-cur = c.cursor()
-cur.execute(
-    "INSERT INTO participantes(nombre,correo,telefono,sorteo_id,codigo) VALUES(%s,%s,%s,%s,%s) RETURNING id",
-    (nombre,correo,telefono,sorteo_id,codigo)
-)
-numero = cur.fetchone()["id"]
-c.commit()
-c.close()
- return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Registro</title><style>{{style}}</style></head><body><div class=wrap style='padding-top:50px'><div class=card style='max-width:520px;margin:auto;text-align:center'><h1>✅ Registro exitoso</h1><p>Tu número de participación es</p><div style='font-size:60px;font-weight:900;color:#b8872d'>#{{numero}}</div><p style='margin-top:25px'>Tu código de participación es:</p><div style='font-size:30px;font-weight:900;color:#111;letter-spacing:2px'>{{codigo}}</div><p style='color:#666'>Guarda este código para consultar tu participación.</p><a class='btn dark' href='/'>Volver al inicio</a></div></div></body></html>""",style=BASE_STYLE,numero=numero,codigo=codigo)
+        codigo = generar_codigo()
+        cur = c.cursor()
+        cur.execute("INSERT INTO participantes(nombre,correo,telefono,sorteo_id,codigo) VALUES(%s,%s,%s,%s,%s) RETURNING id", (nombre,correo,telefono,sorteo_id,codigo))
+        numero = cur.fetchone()["id"]
+        c.commit()
+        c.close()
+        return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Registro</title><style>{{style}}</style></head><body><div class=wrap style='padding-top:50px'><div class=card style='max-width:520px;margin:auto;text-align:center'><h1>✅ Registro exitoso</h1><p>Tu número de participación es</p><div style='font-size:60px;font-weight:900;color:#b8872d'>#{{numero}}</div><p style='margin-top:25px'>Tu código de participación es:</p><div style='font-size:30px;font-weight:900;color:#111;letter-spacing:2px'>{{codigo}}</div><p style='color:#666'>Guarda este código para consultar tu participación.</p><a class='btn dark' href='/'>Volver al inicio</a></div></div></body></html>""",style=BASE_STYLE,numero=numero,codigo=codigo)
     c.close()
     return render_template_string("""<!doctype html><html lang=es><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Participar</title><style>{{style}}</style></head><body><div class=wrap style='padding:40px 15px'><div class=card style='max-width:560px;margin:auto'><h1>{{s['nombre']}}</h1><h2>{{s['premio']}}</h2>{% if s['imagen_premio'] %}<img class=prizeimg src='{{s['imagen_premio']}}'>{% endif %}<p class=muted>{{s['descripcion']}}</p><form method=post><label>Nombre completo</label><input name=nombre required><label>Correo electrónico</label><input type=email name=correo required><label>Teléfono</label><input name=telefono required><button class='btn dark' style='width:100%'>Participar</button></form></div></div></body></html>""",style=BASE_STYLE,s=s)
 
