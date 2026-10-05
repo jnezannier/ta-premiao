@@ -145,7 +145,7 @@ def _ganadores_para(sorteos):
 def participar(sorteo_id):
     c=conectar(); s=c.execute("SELECT * FROM sorteos WHERE id=%s AND activo=1",(sorteo_id,)).fetchone()
     if not s:c.close(); return "Sorteo no encontrado.",404
-        if request.method=="POST":
+    if request.method=="POST":
         nombre=request.form.get("nombre","").strip(); correo=request.form.get("correo","").strip(); telefono=request.form.get("telefono","").strip()
         if not nombre or not correo or not telefono:c.close(); return "Completa todos los campos.",400
         if c.execute("SELECT id FROM participantes WHERE correo=%s AND sorteo_id=%s",(correo,sorteo_id)).fetchone():c.close(); return "Este correo ya está registrado en este sorteo.",409
